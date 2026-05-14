@@ -153,8 +153,8 @@ const CONFIG = {
         'North America': [[10, -130], [75, -50]],
         'South America': [[-55, -85], [15, -35]],
         'Oceania': [[-45, 110], [-5, 180]],
-        'World': [[-55, -125], [75, 178]],
-        'World20': [[-55, -125], [75, 178]]
+        'World': [[-55, -125], [70, 178]],
+        'World20': [[-55, -125], [70, 178]]
     },
     colors: {
         default: '#ffffff',
@@ -476,15 +476,10 @@ const app = {
                     let antarcticaIndex = data.features.findIndex(f => f.properties.name === "Antarctica");
                     if (antarcticaIndex !== -1) {
                         let antFeature = data.features[antarcticaIndex];
-                        // Оставляем только территории от -72 до +90 градусов (отрезаем гигантский южный "хвост")
-                        const antClip = turf.bboxPolygon([-180, -72, 180, 90]); 
-                        let clippedAnt = turf.intersect(antFeature, antClip);
-                        if (clippedAnt) {
-                            clippedAnt.properties = antFeature.properties;
-                            data.features[antarcticaIndex] = clippedAnt;
-                        } else {
-                            data.features.splice(antarcticaIndex, 1);
-                        }
+                        // Создаем ровную полосу по всему нижнему краю карты
+                        const antarcticaStrip = turf.bboxPolygon([-180, -85, 180, -60]);
+                        antarcticaStrip.properties = antFeature.properties;
+                        data.features[antarcticaIndex] = antarcticaStrip;
                     }
                 } catch (e) {
                     console.error("Ошибка Turf.js:", e);
@@ -580,10 +575,12 @@ const app = {
                 app.queue = app.queue.slice(0, 20);
             }
             app.totalQuestions = app.queue.length; // Фиксируем общее количество вопросов
+            app.saveProgress(); // Сохраняем начальное состояние
         }
 
         document.getElementById('total-count').innerText = app.totalQuestions;
-        app.map.fitBounds(CONFIG.bounds[app.reg], { padding: [10, 10], animate: false });
+        let pad = (app.reg.startsWith('World')) ? [0, 0] : [10, 10];
+        app.map.fitBounds(CONFIG.bounds[app.reg], { padding: pad, animate: false });
         app.nextQuestion();
     },
 
@@ -627,6 +624,7 @@ const app = {
             if (center) app.map.flyTo(center, app.map.getZoom(), { duration: 1.2 });
             
             app.queue.push(app.target); // Перенос вопроса в конец
+            app.saveProgress(); // Сохраняем стейт, чтобы вопрос точно остался в конце при перезагрузке
             app.timer = setTimeout(() => app.skipDelay(), 3000); 
         }
     },
@@ -646,7 +644,8 @@ const app = {
         }
         
         app.target = app.queue.shift();
-        app.map.flyToBounds(CONFIG.bounds[app.reg], { padding: [10, 10], duration: 1 });
+        let pad = (app.reg.startsWith('World')) ? [0, 0] : [10, 10];
+        app.map.flyToBounds(CONFIG.bounds[app.reg], { padding: pad, duration: 1 });
         app.updateUI();
     },
 
