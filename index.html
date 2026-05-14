@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>GeoMaster</title>
+    <title>GEO</title>
 
     <link rel="apple-touch-icon" href="GEO.png">  
     
@@ -450,34 +450,25 @@ const app = {
                     if (ukraineIndex !== -1) {
                         let ukraineFeature = data.features[ukraineIndex];
                         
-                        // Полигон обрезки по координатам перешейков (Perekop, Chongar, Arabat)
-                        const crimeaClip = turf.polygon([[
-                            [31.0, 44.0],
-                            [37.5, 44.0],
-                            [37.5, 45.6], // Выше Керчи
-                            [35.0, 45.8], // Арабатская стрелка
-                            [34.5, 46.0], // Чонгар
-                            [33.0, 46.2], // Перекоп
-                            [31.0, 46.2],
-                            [31.0, 44.0]  // Замыкаем кольцо
-                        ]]);
+                        // Идеально ровный прямоугольник (BBox) для 100% надежного разрезания (minLng, minLat, maxLng, maxLat)
+                        const crimeaBbox = turf.bboxPolygon([31.2, 44.2, 36.8, 46.15]);
                         
-                        // Получаем Крым (пересечение Украины и нашего обрезающего полигона)
-                        let crimea = turf.intersect(ukraineFeature, crimeaClip);
+                        // Получаем Крым
+                        let crimea = turf.intersect(ukraineFeature, crimeaBbox);
                         if (crimea) {
                             crimea.properties = { name: "Crimea" };
                             data.features.push(crimea); // Добавляем Крым как отдельный объект (он уйдет в Russia)
                         }
                         
-                        // Получаем Украину без Крыма (разница Украины и обрезающего полигона)
-                        let ukraineMinusCrimea = turf.difference(ukraineFeature, crimeaClip);
+                        // Отрезаем Крым от Украины
+                        let ukraineMinusCrimea = turf.difference(ukraineFeature, crimeaBbox);
                         if (ukraineMinusCrimea) {
                             ukraineMinusCrimea.properties = ukraineFeature.properties;
                             data.features[ukraineIndex] = ukraineMinusCrimea; // Перезаписываем Украину
                         }
                     }
                 } catch (e) {
-                    console.error("Ошибка обрезки полигонов:", e);
+                    console.error("Ошибка обрезки Крыма Turf.js:", e);
                 }
                 // ------------------------------------------------
 
@@ -591,8 +582,12 @@ const app = {
             app.setCountryStyle(name, { fillColor: CONFIG.colors.incorrect });
             app.setCountryStyle(app.target, { fillColor: CONFIG.colors.hint }); 
             
-            if (app.mode !== 'name') {
-                const targetEl = document.getElementById('target-name');
+            const targetEl = document.getElementById('target-name');
+            if (app.mode === 'cap') {
+                targetEl.innerHTML = `<span style="color:var(--incorrect)">❗</span> <span style="color:var(--target-hint)">${DB[app.target].name} - ${DB[app.target].cap}</span>`;
+            } else if (app.mode === 'flag') {
+                targetEl.innerHTML = `<span style="color:var(--incorrect)">❗</span> <span style="color:var(--target-hint)">${DB[app.target].name} - ${DB[app.target].flag}</span>`;
+            } else {
                 targetEl.innerHTML = `<span style="color:var(--incorrect)">Ошибка:</span> <span style="color:var(--target-hint)">${DB[app.target].name}</span>`;
             }
 
