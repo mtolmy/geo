@@ -249,7 +249,7 @@ const DB = {
     "Saudi Arabia":{name:"Саудовская Аравия", cap:"Эр-Рияд", pop:"36 млн", flag:"🇸🇦", reg:"Asia"},
     "Uzbekistan":{name:"Узбекистан", cap:"Ташкент", pop:"35 млн", flag:"🇺🇿", reg:"Asia"},
     "Malaysia":{name:"Малайзия", cap:"Куала-Лумпур", pop:"33 млн", flag:"🇲🇾", reg:"Asia"},
-    "Yemen":{name:"Йемен", cap:"Сана", pop:"33 млн", flag:"🇾🇪", reg:"Asia"},
+    "Yemen":{name:"Йемен", cap:"Сана", pop:"33மைப்புn", flag:"🇾🇪", reg:"Asia"},
     "Nepal":{name:"Непал", cap:"Катманду", pop:"30 млн", flag:"🇳🇵", reg:"Asia"},
     "North Korea":{name:"КНДР", cap:"Пхеньян", pop:"26 млн", flag:"🇰🇵", reg:"Asia"},
     "Sri Lanka":{name:"Шри-Ланка", cap:"Коломбо", pop:"22 млн", flag:"🇱🇰", reg:"Asia"},
@@ -476,10 +476,14 @@ const app = {
                     let antarcticaIndex = data.features.findIndex(f => f.properties.name === "Antarctica");
                     if (antarcticaIndex !== -1) {
                         let antFeature = data.features[antarcticaIndex];
-                        // Создаем ровную полосу по всему нижнему краю карты
-                        const antarcticaStrip = turf.bboxPolygon([-180, -85, 180, -60]);
-                        antarcticaStrip.properties = antFeature.properties;
-                        data.features[antarcticaIndex] = antarcticaStrip;
+                        const antClip = turf.bboxPolygon([-180, -72, 180, 90]); 
+                        let clippedAnt = turf.intersect(antFeature, antClip);
+                        if (clippedAnt) {
+                            clippedAnt.properties = antFeature.properties;
+                            data.features[antarcticaIndex] = clippedAnt;
+                        } else {
+                            data.features.splice(antarcticaIndex, 1);
+                        }
                     }
                 } catch (e) {
                     console.error("Ошибка Turf.js:", e);
