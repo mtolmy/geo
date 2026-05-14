@@ -47,7 +47,7 @@
         
         #question-box { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
         #task-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 2px; }
-        #target-name { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
+        #target-name { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; display: flex; align-items: center;}
         
         .right-controls { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; min-width: 80px; }
         #score-box { font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
@@ -293,7 +293,7 @@ const DB = {
     "Sudan":{name:"Судан", cap:"Хартум", pop:"45 млн", flag:"🇸🇩", reg:"Africa"},
     "Morocco":{name:"Марокко", cap:"Рабат", pop:"37 млн", flag:"🇲🇦", reg:"Africa"},
     "Angola":{name:"Ангола", cap:"Луанда", pop:"34 млн", flag:"🇦🇴", reg:"Africa"},
-    "Mozambique":{name:"Мозамбик", cap:"Мапуту", pop:"32 млн", flag:"🇲🇿", reg:"Africa"},
+    "Mozambique":{name:"Мозамбик", cap:"Мапуту", pop:"32 মোহn", flag:"🇲🇿", reg:"Africa"},
     "Ghana":{name:"Гана", cap:"Аккра", pop:"32 млн", flag:"🇬🇭", reg:"Africa"},
     "Madagascar":{name:"Мадагаскар", cap:"Антананариву", pop:"28 млн", flag:"🇲🇬", reg:"Africa"},
     "Cameroon":{name:"Камерун", cap:"Яунде", pop:"27 млн", flag:"🇨🇲", reg:"Africa"},
@@ -396,14 +396,17 @@ const DB = {
 const app = {
     map: null, geoLayer: null, geoData: null,
     mode: 'name', reg: 'Europe',
-    queue: [], solved: 0, target: null,
+    queue: [], solved: 0, target: null, totalQuestions: 0,
     isLocked: false, isHolding: false, timer: null, layers: {},
 
     getStandardName: (n) => {
         if (!n) return "";
-        // Теперь "Crimea" гарантированно будет возвращать "Russia"
+        // Крым жестко закреплен за Россией
         if (n === "Russian Federation" || n === "Crimea") return "Russia"; 
         
+        // Объединение частей Великобритании
+        if (n === "United Kingdom" || n === "England" || n === "Scotland" || n === "Wales" || n === "Northern Ireland" || n === "Great Britain" || n === "U.K. of Great Britain and Northern Ireland") return "United Kingdom";
+
         if (n === "United States of America") return "USA";
         if (n === "Republic of Korea") return "South Korea";
         if (n === "Democratic People's Republic of Korea") return "North Korea";
@@ -450,31 +453,41 @@ const app = {
             .then(r => { if (!r.ok) throw new Error(); return r.json(); })
             .then(data => {
                 
-                // --- МАТЕМАТИЧЕСКАЯ ОБРЕЗКА КРЫМА ОТ УКРАИНЫ ---
+                // --- МАТЕМАТИЧЕСКАЯ ОБРЕЗКА И РАЗДЕЛЕНИЕ ---
                 try {
+                    // 1. Отрезаем Крым от Украины
                     let ukraineIndex = data.features.findIndex(f => f.properties.name === "Ukraine");
                     if (ukraineIndex !== -1) {
                         let ukraineFeature = data.features[ukraineIndex];
-                        
-                        // Идеально ровный прямоугольник (BBox) для 100% надежного разрезания (minLng, minLat, maxLng, maxLat)
                         const crimeaBbox = turf.bboxPolygon([31.2, 44.2, 36.8, 46.15]);
-                        
-                        // Получаем Крым
                         let crimea = turf.intersect(ukraineFeature, crimeaBbox);
                         if (crimea) {
                             crimea.properties = { name: "Crimea" };
-                            data.features.push(crimea); // Добавляем Крым как отдельный объект (он уйдет в Russia)
+                            data.features.push(crimea); 
                         }
-                        
-                        // Отрезаем Крым от Украины
                         let ukraineMinusCrimea = turf.difference(ukraineFeature, crimeaBbox);
                         if (ukraineMinusCrimea) {
                             ukraineMinusCrimea.properties = ukraineFeature.properties;
-                            data.features[ukraineIndex] = ukraineMinusCrimea; // Перезаписываем Украину
+                            data.features[ukraineIndex] = ukraineMinusCrimea; 
+                        }
+                    }
+
+                    // 2. Обрезаем Антарктиду (оставляем только самый верх для красоты)
+                    let antarcticaIndex = data.features.findIndex(f => f.properties.name === "Antarctica");
+                    if (antarcticaIndex !== -1) {
+                        let antFeature = data.features[antarcticaIndex];
+                        // Оставляем только территории от -62 до +90 градусов (отрезаем гигантский южный "хвост")
+                        const antClip = turf.bboxPolygon([-180, -62, 180, 90]); 
+                        let clippedAnt = turf.intersect(antFeature, antClip);
+                        if (clippedAnt) {
+                            clippedAnt.properties = antFeature.properties;
+                            data.features[antarcticaIndex] = clippedAnt;
+                        } else {
+                            data.features.splice(antarcticaIndex, 1);
                         }
                     }
                 } catch (e) {
-                    console.error("Ошибка обрезки Крыма Turf.js:", e);
+                    console.error("Ошибка Turf.js:", e);
                 }
                 // ------------------------------------------------
 
@@ -502,14 +515,21 @@ const app = {
     },
 
     initNewGame: () => {
-        app.solved = 0; app.queue = [];
+        app.solved = 0; app.queue = []; app.totalQuestions = 0;
         app.startGame(false);
     },
 
     resumeGame: () => {
         try {
             const s = JSON.parse(localStorage.getItem('geoSavePro'));
-            if(s) { app.queue = s.queue; app.solved = s.solved; app.mode = s.mode; app.reg = s.reg; app.startGame(true); }
+            if(s) { 
+                app.queue = s.queue; 
+                app.solved = s.solved; 
+                app.mode = s.mode; 
+                app.reg = s.reg; 
+                app.totalQuestions = s.totalQuestions || (s.queue.length + s.solved);
+                app.startGame(true); 
+            }
         } catch(e) { app.initNewGame(); }
     },
 
@@ -559,9 +579,10 @@ const app = {
             if (app.reg === 'World20') {
                 app.queue = app.queue.slice(0, 20);
             }
+            app.totalQuestions = app.queue.length; // Фиксируем общее количество вопросов
         }
 
-        document.getElementById('total-count').innerText = app.queue.length + app.solved;
+        document.getElementById('total-count').innerText = app.totalQuestions;
         app.map.fitBounds(CONFIG.bounds[app.reg], { padding: [10, 10], animate: false });
         app.nextQuestion();
     },
@@ -585,12 +606,14 @@ const app = {
             app.setCountryStyle(app.target, { fillColor: CONFIG.colors.hint }); 
             
             const targetEl = document.getElementById('target-name');
+            const alertIcon = `<span style="color:var(--incorrect); font-weight:900; font-size:18px;">!</span>`;
+            
             if (app.mode === 'cap') {
-                targetEl.innerHTML = `<span style="color:var(--incorrect)">❗</span> <span style="color:var(--target-hint)">${DB[app.target].name} - ${DB[app.target].cap}</span>`;
+                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint)">${DB[app.target].name} - ${DB[app.target].cap}</span>`;
             } else if (app.mode === 'flag') {
-                targetEl.innerHTML = `<span style="color:var(--incorrect)">❗</span> <span style="color:var(--target-hint)">${DB[app.target].name} - ${DB[app.target].flag}</span>`;
+                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint)">${DB[app.target].name} - <span style="font-size:1.5em; vertical-align:middle;">${DB[app.target].flag}</span></span>`;
             } else {
-                targetEl.innerHTML = `<span style="color:var(--incorrect)">Ошибка:</span> <span style="color:var(--target-hint)">${DB[app.target].name}</span>`;
+                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint)">${DB[app.target].name}</span>`;
             }
 
             let center;
@@ -603,7 +626,7 @@ const app = {
 
             if (center) app.map.flyTo(center, app.map.getZoom(), { duration: 1.2 });
             
-            app.queue.push(app.target);
+            app.queue.push(app.target); // Перенос вопроса в конец
             app.timer = setTimeout(() => app.skipDelay(), 3000); 
         }
     },
@@ -653,15 +676,17 @@ const app = {
         if (!app.target) return;
         
         const d = DB[app.target] || { name: app.target, cap: "?", flag: "🏳️" };
-        
-        let txt = "";
-        if (app.mode === 'name') txt = d.name;
-        else if (app.mode === 'cap') txt = "Столица: " + d.cap;
-        else txt = "Чей флаг? " + d.flag;
-        
         const targetEl = document.getElementById('target-name');
         targetEl.style.color = "var(--accent)";
-        targetEl.innerText = txt;
+        
+        if (app.mode === 'name') {
+            targetEl.innerHTML = d.name;
+        } else if (app.mode === 'cap') {
+            targetEl.innerHTML = "Столица: " + d.cap;
+        } else {
+            // Увеличиваем флаг в 3 раза для вопроса
+            targetEl.innerHTML = `Чей флаг? <span style="font-size: 3em; vertical-align: middle; line-height: 0.8; display: inline-block; margin-left: 8px;">${d.flag}</span>`;
+        }
     },
 
     showInfo: (name) => {
@@ -673,7 +698,7 @@ const app = {
     },
 
     saveProgress: () => {
-        try { localStorage.setItem('geoSavePro', JSON.stringify({ queue: app.queue, solved: app.solved, mode: app.mode, reg: app.reg })); } catch(e){}
+        try { localStorage.setItem('geoSavePro', JSON.stringify({ queue: app.queue, solved: app.solved, mode: app.mode, reg: app.reg, totalQuestions: app.totalQuestions })); } catch(e){}
     }
 };
 
