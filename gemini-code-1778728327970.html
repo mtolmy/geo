@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>GeoMaster</title>
+
+    <link rel="apple-touch-icon" href="GEO.png">  
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Добавлена библиотека Turf.js для разрезания геометрии полигонов на лету -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #f8fafc; --panel-bg: #ffffff; --accent: #0f172a;
+            --correct: #34d399; --incorrect: #f87171; --target-hint: #60a5fa;
+            --text: #1e293b; --muted: #64748b;
+        }
+        
+        * { box-sizing: border-box; touch-action: manipulation; }
+        
+        body, html { 
+            margin: 0; padding: 0; width: 100%; 
+            height: 100%; height: -webkit-fill-available;
+            font-family: 'Inter', sans-serif; background: var(--bg-color); color: var(--text); overflow: hidden; 
+            /* Предотвращаем выделение текста и вызов меню при долгом нажатии */
+            -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+        }
+        
+        .app-layout { 
+            display: flex; flex-direction: column; 
+            height: 100vh; height: 100dvh; 
+        }
+        
+        #map { height: 90%; width: 100%; background: #e2e8f0; z-index: 1; }
+        
+        #bottom-panel {
+            height: 10%; background: var(--panel-bg); border-top: 1px solid #cbd5e1;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 15px calc(env(safe-area-inset-bottom) + 5px) 15px; z-index: 1000;
+            box-shadow: 0 -4px 15px rgba(0,0,0,0.03);
+            cursor: pointer;
+        }
+        
+        #question-box { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+        #task-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 2px; }
+        #target-name { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
+        
+        .right-controls { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; min-width: 80px; }
+        #score-box { font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
+        .btn-small { background: #f1f5f9; color: var(--accent); border: 1px solid #e2e8f0; padding: 6px 14px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase; transition: background 0.2s; }
+        .btn-small:active { background: #e2e8f0; }
+        
+        .clickable-country { cursor: pointer; outline: none; transition: fill-opacity 0.2s; }
+        .clickable-country:hover { fill-opacity: 0.7 !important; }
+        
+        #info-overlay {
+            position: absolute; top: max(20px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.98); backdrop-filter: blur(10px); padding: 14px 24px;
+            border-radius: 100px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); z-index: 2000;
+            display: none; text-align: center; border: 1px solid rgba(0,0,0,0.05); pointer-events: none; width: 90%; max-width: 360px;
+        }
+        
+        #start-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--accent); color: white;
+            display: flex; flex-direction: column; align-items: center; justify-content: flex-start; z-index: 3000; transition: opacity 0.3s ease; overflow-y: auto; padding: 20px;
+        }
+        
+        .menu-card { background: rgba(255,255,255,0.03); padding: 24px; border-radius: 24px; width: 100%; max-width: 420px; margin: auto; border: 1px solid rgba(255,255,255,0.05); }
+        .section-title { font-size: 11px; text-transform: uppercase; color: #94a3b8; margin: 20px 0 10px 0; letter-spacing: 1px; font-weight: 600; }
+        
+        .grid-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .btn-menu { background: rgba(255,255,255,0.05); color: #cbd5e1; border: 2px solid transparent; padding: 14px; border-radius: 14px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-menu.active { background: rgba(255,255,255,0.1); color: white; border-color: #3b82f6; }
+        
+        .btn-start { width: 100%; padding: 18px; border-radius: 16px; border: none; background: #3b82f6; color: white; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 25px; transition: background 0.2s; }
+        .btn-start:active { background: #2563eb; }
+        .btn-resume { background: #10b981; margin-top: 0; margin-bottom: 5px; }
+        
+        .hidden { display: none !important; }
+        .error-msg { color: #f87171; background: rgba(248, 113, 113, 0.1); padding: 15px; border-radius: 12px; font-size: 14px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+<div id="start-overlay">
+    <div class="menu-card">
+        <h1 style="margin: 0 0 5px 0; font-size: 28px; text-align: center; color: white;">GeoMaster</h1>
+        <p style="margin: 0 0 20px 0; text-align: center; color: #94a3b8; font-size: 14px;">Контурная карта (195 стран)</p>
+        
+        <div id="loading-text" style="text-align: center; padding: 30px 0; color: #94a3b8;">
+            <svg style="width:24px; height:24px; animation: spin 1s linear infinite; margin-bottom: 10px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg><br>
+            Загрузка спутниковых границ...
+        </div>
+        <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
+
+        <div id="ui-content" class="hidden">
+            <button id="resume-btn" class="btn-start btn-resume hidden" onclick="app.resumeGame()">Продолжить игру</button>
+            
+            <div class="section-title">Тип задания</div>
+            <div class="grid-menu" id="mode-selector">
+                <button class="btn-menu active" onclick="app.setMode('name', this)">Названия</button>
+                <button class="btn-menu" onclick="app.setMode('cap', this)">Столицы</button>
+                <button class="btn-menu" onclick="app.setMode('flag', this)" style="grid-column: span 2;">Флаги</button>
+            </div>
+            
+            <div class="section-title">Континент</div>
+            <div class="grid-menu" id="region-selector">
+                <button class="btn-menu active" onclick="app.setReg('Europe', this)">Европа (44)</button>
+                <button class="btn-menu" onclick="app.setReg('Asia', this)">Азия (48)</button>
+                <button class="btn-menu" onclick="app.setReg('Africa', this)">Африка (54)</button>
+                <button class="btn-menu" onclick="app.setReg('North America', this)">Сев.Америка (23)</button>
+                <button class="btn-menu" onclick="app.setReg('South America', this)">Юж.Америка (12)</button>
+                <button class="btn-menu" onclick="app.setReg('Oceania', this)">Океания (14)</button>
+                <button class="btn-menu" onclick="app.setReg('World', this)" style="grid-column: span 2; background: rgba(59, 130, 246, 0.2); border-color: transparent; color: white;">Все страны мира (195) 🌍</button>
+            </div>
+            <button class="btn-start" onclick="app.initNewGame()">Начать новую игру</button>
+        </div>
+    </div>
+</div>
+
+<div class="app-layout">
+    <div id="map"></div>
+    <div id="bottom-panel">
+        <div id="question-box">
+            <span id="task-label">Найдите на карте:</span>
+            <span id="target-name">Подготовка...</span>
+        </div>
+        <div class="right-controls">
+            <div id="score-box"><span id="current-score">0</span> / <span id="total-count">0</span></div>
+            <button class="btn-small" onclick="location.reload(true)">Меню</button>
+        </div>
+    </div>
+</div>
+
+<div id="info-overlay"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// --- КОНФИГУРАЦИЯ ДАННЫХ ---
+const CONFIG = {
+    bounds: {
+        'Europe': [[35, -10], [70, 40]],
+        'Asia': [[-10, 35], [55, 145]],
+        'Africa': [[-35, -20], [38, 55]],
+        'North America': [[10, -130], [75, -50]],
+        'South America': [[-55, -85], [15, -35]],
+        'Oceania': [[-45, 110], [-5, 180]],
+        'World': [[-55, -170], [75, 170]]
+    },
+    colors: {
+        default: '#ffffff',
+        border: '#94a3b8',
+        correct: '#34d399',
+        incorrect: '#f87171',
+        hint: '#60a5fa'
+    }
+};
+
+// Координаты для карликовых и островных государств
+const DWARFS = {
+    "Vatican": [41.9029, 12.4534], "Monaco": [43.7384, 7.4246], "San Marino": [43.9424, 12.4578],
+    "Liechtenstein": [47.1660, 9.5554], "Andorra": [42.5063, 1.5218], "Malta": [35.9375, 14.3754],
+    "Maldives": [3.2028, 73.2207], "Bahrain": [26.0667, 50.5577], "Singapore": [1.3521, 103.8198],
+    "Seychelles": [-4.6796, 55.4920], "Sao Tome and Principe": [0.1864, 6.6131],
+    "Comoros": [-11.8750, 43.8722], "Cabo Verde": [16.5388, -23.0418],
+    "Saint Kitts and Nevis": [17.3578, -62.7830], "Antigua and Barbuda": [17.0608, -61.7964],
+    "Dominica": [15.4150, -61.3710], "Saint Lucia": [13.9094, -60.9789],
+    "Barbados": [13.1939, -59.5432], "Saint Vincent": [13.2528, -61.1971],
+    "Grenada": [12.1165, -61.6790], "Tuvalu": [-8.5147, 179.1940],
+    "Nauru": [-0.5228, 166.9315], "Palau": [7.5150, 134.5825],
+    "Marshall Islands": [7.1315, 171.1845], "Micronesia": [6.8874, 158.2150],
+    "Kiribati": [1.4518, 173.0030], "Samoa": [-13.7590, -172.1046],
+    "Tonga": [-21.1790, -175.1982], "Vanuatu": [-15.3767, 166.9592]
+};
+
+const DB = {
+    // ЕВРОПА (44)
+    "Russia":{name:"Россия", cap:"Москва", pop:"146 млн", flag:"🇷🇺", reg:"Europe"},
+    "Ukraine":{name:"Украина", cap:"Киев", pop:"41 млн", flag:"🇺🇦", reg:"Europe"},
+    "France":{name:"Франция", cap:"Париж", pop:"67 млн", flag:"🇫🇷", reg:"Europe"},
+    "Germany":{name:"Германия", cap:"Берлин", pop:"83 млн", flag:"🇩🇪", reg:"Europe"},
+    "Italy":{name:"Италия", cap:"Рим", pop:"59 млн", flag:"🇮🇹", reg:"Europe"},
+    "Spain":{name:"Испания", cap:"Мадрид", pop:"47 млн", flag:"🇪🇸", reg:"Europe"},
+    "United Kingdom":{name:"Великобритания", cap:"Лондон", pop:"67 млн", flag:"🇬🇧", reg:"Europe"},
+    "Poland":{name:"Польша", cap:"Варшава", pop:"38 млн", flag:"🇵🇱", reg:"Europe"},
+    "Romania":{name:"Румыния", cap:"Бухарест", pop:"19 млн", flag:"🇷🇴", reg:"Europe"},
+    "Netherlands":{name:"Нидерланды", cap:"Амстердам", pop:"17.5 млн", flag:"🇳🇱", reg:"Europe"},
+    "Belgium":{name:"Бельгия", cap:"Брюссель", pop:"11.6 млн", flag:"🇧🇪", reg:"Europe"},
+    "Czechia":{name:"Чехия", cap:"Прага", pop:"10.7 млн", flag:"🇨🇿", reg:"Europe"},
+    "Greece":{name:"Греция", cap:"Афины", pop:"10.4 млн", flag:"🇬🇷", reg:"Europe"},
+    "Portugal":{name:"Португалия", cap:"Лиссабон", pop:"10.3 млн", flag:"🇵🇹", reg:"Europe"},
+    "Sweden":{name:"Швеция", cap:"Стокгольм", pop:"10.4 млн", flag:"🇸🇪", reg:"Europe"},
+    "Hungary":{name:"Венгрия", cap:"Будапешт", pop:"9.7 млн", flag:"🇭🇺", reg:"Europe"},
+    "Belarus":{name:"Беларусь", cap:"Минск", pop:"9.3 млн", flag:"🇧🇾", reg:"Europe"},
+    "Austria":{name:"Австрия", cap:"Вена", pop:"8.9 млн", flag:"🇦🇹", reg:"Europe"},
+    "Serbia":{name:"Сербия", cap:"Белград", pop:"6.8 млн", flag:"🇷🇸", reg:"Europe"},
+    "Switzerland":{name:"Швейцария", cap:"Берн", pop:"8.7 млн", flag:"🇨🇭", reg:"Europe"},
+    "Bulgaria":{name:"Болгария", cap:"София", pop:"6.8 млн", flag:"🇧🇬", reg:"Europe"},
+    "Denmark":{name:"Дания", cap:"Копенгаген", pop:"5.8 млн", flag:"🇩🇰", reg:"Europe"},
+    "Finland":{name:"Финляндия", cap:"Хельсинки", pop:"5.5 млн", flag:"🇫🇮", reg:"Europe"},
+    "Slovakia":{name:"Словакия", cap:"Братислава", pop:"5.4 млн", flag:"🇸🇰", reg:"Europe"},
+    "Norway":{name:"Норвегия", cap:"Осло", pop:"5.4 млн", flag:"🇳🇴", reg:"Europe"},
+    "Ireland":{name:"Ирландия", cap:"Дублин", pop:"5 млн", flag:"🇮🇪", reg:"Europe"},
+    "Croatia":{name:"Хорватия", cap:"Загреб", pop:"4 млн", flag:"🇭🇷", reg:"Europe"},
+    "Moldova":{name:"Молдова", cap:"Кишинев", pop:"2.6 млн", flag:"🇲🇩", reg:"Europe"},
+    "Bosnia and Herzegovina":{name:"Босния и Герцеговина", cap:"Сараево", pop:"3.2 млн", flag:"🇧🇦", reg:"Europe"},
+    "Albania":{name:"Албания", cap:"Тирана", pop:"2.8 млн", flag:"🇦🇱", reg:"Europe"},
+    "Lithuania":{name:"Литва", cap:"Вильнюс", pop:"2.8 млн", flag:"🇱🇹", reg:"Europe"},
+    "North Macedonia":{name:"Сев. Македония", cap:"Скопье", pop:"2 млн", flag:"🇲🇰", reg:"Europe"},
+    "Slovenia":{name:"Словения", cap:"Любляна", pop:"2.1 млн", flag:"🇸🇮", reg:"Europe"},
+    "Latvia":{name:"Латвия", cap:"Рига", pop:"1.9 млн", flag:"🇱🇻", reg:"Europe"},
+    "Estonia":{name:"Эстония", cap:"Таллин", pop:"1.3 млн", flag:"🇪🇪", reg:"Europe"},
+    "Montenegro":{name:"Черногория", cap:"Подгорица", pop:"620 тыс.", flag:"🇲🇪", reg:"Europe"},
+    "Luxembourg":{name:"Люксембург", cap:"Люксембург", pop:"640 тыс.", flag:"🇱🇺", reg:"Europe"},
+    "Malta":{name:"Мальта", cap:"Валлетта", pop:"515 тыс.", flag:"🇲🇹", reg:"Europe"},
+    "Iceland":{name:"Исландия", cap:"Рейкьявик", pop:"370 тыс.", flag:"🇮🇸", reg:"Europe"},
+    "Andorra":{name:"Андорра", cap:"Андорра-ла-Велья", pop:"77 тыс.", flag:"🇦🇩", reg:"Europe"},
+    "Monaco":{name:"Монако", cap:"Монако", pop:"39 тыс.", flag:"🇲🇨", reg:"Europe"},
+    "Liechtenstein":{name:"Лихтенштейн", cap:"Вадуц", pop:"38 тыс.", flag:"🇱🇮", reg:"Europe"},
+    "San Marino":{name:"Сан-Марино", cap:"Сан-Марино", pop:"34 тыс.", flag:"🇸🇲", reg:"Europe"},
+    "Vatican":{name:"Ватикан", cap:"Ватикан", pop:"800 чел.", flag:"🇻🇦", reg:"Europe"},
+
+    // АЗИЯ (48)
+    "China":{name:"Китай", cap:"Пекин", pop:"1.4 млрд", flag:"🇨🇳", reg:"Asia"},
+    "India":{name:"Индия", cap:"Нью-Дели", pop:"1.4 млрд", flag:"🇮🇳", reg:"Asia"},
+    "Indonesia":{name:"Индонезия", cap:"Джакарта", pop:"275 млн", flag:"🇮🇩", reg:"Asia"},
+    "Pakistan":{name:"Пакистан", cap:"Исламабад", pop:"235 млн", flag:"🇵🇰", reg:"Asia"},
+    "Bangladesh":{name:"Бангладеш", cap:"Дакка", pop:"169 млн", flag:"🇧🇩", reg:"Asia"},
+    "Japan":{name:"Япония", cap:"Токио", pop:"125 млн", flag:"🇯🇵", reg:"Asia"},
+    "Philippines":{name:"Филиппины", cap:"Манила", pop:"113 млн", flag:"🇵🇭", reg:"Asia"},
+    "Vietnam":{name:"Вьетнам", cap:"Ханой", pop:"98 млн", flag:"🇻🇳", reg:"Asia"},
+    "Turkey":{name:"Турция", cap:"Анкара", pop:"85 млн", flag:"🇹🇷", reg:"Asia"},
+    "Iran":{name:"Иран", cap:"Тегеран", pop:"87 млн", flag:"🇮🇷", reg:"Asia"},
+    "Thailand":{name:"Таиланд", cap:"Бангкок", pop:"71 млн", flag:"🇹🇭", reg:"Asia"},
+    "Myanmar":{name:"Мьянма", cap:"Нейпьидо", pop:"54 млн", flag:"🇲🇲", reg:"Asia"},
+    "South Korea":{name:"Южная Корея", cap:"Сеул", pop:"51 млн", flag:"🇰🇷", reg:"Asia"},
+    "Iraq":{name:"Ирак", cap:"Багдад", pop:"43 млн", flag:"🇮🇶", reg:"Asia"},
+    "Afghanistan":{name:"Афганистан", cap:"Кабул", pop:"40 млн", flag:"🇦🇫", reg:"Asia"},
+    "Saudi Arabia":{name:"Саудовская Аравия", cap:"Эр-Рияд", pop:"36 млн", flag:"🇸🇦", reg:"Asia"},
+    "Uzbekistan":{name:"Узбекистан", cap:"Ташкент", pop:"35 млн", flag:"🇺🇿", reg:"Asia"},
+    "Malaysia":{name:"Малайзия", cap:"Куала-Лумпур", pop:"33 млн", flag:"🇲🇾", reg:"Asia"},
+    "Yemen":{name:"Йемен", cap:"Сана", pop:"33 млн", flag:"🇾🇪", reg:"Asia"},
+    "Nepal":{name:"Непал", cap:"Катманду", pop:"30 млн", flag:"🇳🇵", reg:"Asia"},
+    "North Korea":{name:"КНДР", cap:"Пхеньян", pop:"26 млн", flag:"🇰🇵", reg:"Asia"},
+    "Sri Lanka":{name:"Шри-Ланка", cap:"Коломбо", pop:"22 млн", flag:"🇱🇰", reg:"Asia"},
+    "Kazakhstan":{name:"Казахстан", cap:"Астана", pop:"19.6 млн", flag:"🇰🇿", reg:"Asia"},
+    "Syria":{name:"Сирия", cap:"Дамаск", pop:"22 млн", flag:"🇸🇾", reg:"Asia"},
+    "Cambodia":{name:"Камбоджа", cap:"Пномпень", pop:"16 млн", flag:"🇰🇭", reg:"Asia"},
+    "Jordan":{name:"Иордания", cap:"Амман", pop:"11 млн", flag:"🇯🇴", reg:"Asia"},
+    "Azerbaijan":{name:"Азербайджан", cap:"Баку", pop:"10 млн", flag:"🇦🇿", reg:"Asia"},
+    "UAE":{name:"ОАЭ", cap:"Абу-Даби", pop:"9.4 млн", flag:"🇦🇪", reg:"Asia"},
+    "Tajikistan":{name:"Таджикистан", cap:"Душанбе", pop:"9.5 млн", flag:"🇹🇯", reg:"Asia"},
+    "Israel":{name:"Израиль", cap:"Иерусалим", pop:"9.3 млн", flag:"🇮🇱", reg:"Asia"},
+    "Laos":{name:"Лаос", cap:"Вьентьян", pop:"7.3 млн", flag:"🇱🇦", reg:"Asia"},
+    "Lebanon":{name:"Ливан", cap:"Бейрут", pop:"6.8 млн", flag:"🇱🇧", reg:"Asia"},
+    "Kyrgyzstan":{name:"Кыргызстан", cap:"Бишкек", pop:"6.6 млн", flag:"🇰🇬", reg:"Asia"},
+    "Turkmenistan":{name:"Туркменистан", cap:"Ашхабад", pop:"6 млн", flag:"🇹🇲", reg:"Asia"},
+    "Singapore":{name:"Сингапур", cap:"Сингапур", pop:"5.6 млн", flag:"🇸🇬", reg:"Asia"},
+    "Oman":{name:"Оман", cap:"Маскат", pop:"5 млн", flag:"🇴🇲", reg:"Asia"},
+    "Palestine":{name:"Палестина", cap:"Рамалла", pop:"5 млн", flag:"🇵🇸", reg:"Asia"},
+    "Kuwait":{name:"Кувейт", cap:"Эль-Кувейт", pop:"4.2 млн", flag:"🇰🇼", reg:"Asia"},
+    "Georgia":{name:"Грузия", cap:"Тбилиси", pop:"3.7 млн", flag:"🇬🇪", reg:"Asia"},
+    "Mongolia":{name:"Монголия", cap:"Улан-Батор", pop:"3.3 млн", flag:"🇲🇳", reg:"Asia"},
+    "Armenia":{name:"Армения", cap:"Ереван", pop:"2.9 млн", flag:"🇦🇲", reg:"Asia"},
+    "Qatar":{name:"Катар", cap:"Доха", pop:"2.9 млн", flag:"🇶🇦", reg:"Asia"},
+    "Bahrain":{name:"Бахрейн", cap:"Манама", pop:"1.5 млн", flag:"🇧🇭", reg:"Asia"},
+    "Timor-Leste":{name:"Восточный Тимор", cap:"Дили", pop:"1.3 млн", flag:"🇹🇱", reg:"Asia"},
+    "Cyprus":{name:"Кипр", cap:"Никосия", pop:"1.2 млн", flag:"🇨🇾", reg:"Asia"},
+    "Bhutan":{name:"Бутан", cap:"Тхимпху", pop:"780 тыс.", flag:"🇧🇹", reg:"Asia"},
+    "Maldives":{name:"Мальдивы", cap:"Мале", pop:"540 тыс.", flag:"🇲🇻", reg:"Asia"},
+    "Brunei":{name:"Бруней", cap:"Бандар-Сери-Бегаван", pop:"440 тыс.", flag:"🇧🇳", reg:"Asia"},
+
+    // АФРИКА (54)
+    "Nigeria":{name:"Нигерия", cap:"Абуджа", pop:"211 млн", flag:"🇳🇬", reg:"Africa"},
+    "Ethiopia":{name:"Эфиопия", cap:"Аддис-Абеба", pop:"120 млн", flag:"🇪🇹", reg:"Africa"},
+    "Egypt":{name:"Египет", cap:"Каир", pop:"104 млн", flag:"🇪🇬", reg:"Africa"},
+    "DR Congo":{name:"ДР Конго", cap:"Киншаса", pop:"95 млн", flag:"🇨🇩", reg:"Africa"},
+    "Tanzania":{name:"Танзания", cap:"Додома", pop:"63 млн", flag:"🇹🇿", reg:"Africa"},
+    "South Africa":{name:"ЮАР", cap:"Претория", pop:"60 млн", flag:"🇿🇦", reg:"Africa"},
+    "Kenya":{name:"Кения", cap:"Найроби", pop:"55 млн", flag:"🇰🇪", reg:"Africa"},
+    "Uganda":{name:"Уганда", cap:"Кампала", pop:"47 млн", flag:"🇺🇬", reg:"Africa"},
+    "Algeria":{name:"Алжир", cap:"Алжир", pop:"44 млн", flag:"🇩🇿", reg:"Africa"},
+    "Sudan":{name:"Судан", cap:"Хартум", pop:"45 млн", flag:"🇸🇩", reg:"Africa"},
+    "Morocco":{name:"Марокко", cap:"Рабат", pop:"37 млн", flag:"🇲🇦", reg:"Africa"},
+    "Angola":{name:"Ангола", cap:"Луанда", pop:"34 млн", flag:"🇦🇴", reg:"Africa"},
+    "Mozambique":{name:"Мозамбик", cap:"Мапуту", pop:"32 млн", flag:"🇲🇿", reg:"Africa"},
+    "Ghana":{name:"Гана", cap:"Аккра", pop:"32 млн", flag:"🇬🇭", reg:"Africa"},
+    "Madagascar":{name:"Мадагаскар", cap:"Антананариву", pop:"28 млн", flag:"🇲🇬", reg:"Africa"},
+    "Cameroon":{name:"Камерун", cap:"Яунде", pop:"27 млн", flag:"🇨🇲", reg:"Africa"},
+    "Ivory Coast":{name:"Кот-д'Ивуар", cap:"Ямусукро", pop:"27 млн", flag:"🇨🇮", reg:"Africa"},
+    "Niger":{name:"Нигер", cap:"Ниамей", pop:"25 млн", flag:"🇳🇪", reg:"Africa"},
+    "Burkina Faso":{name:"Буркина-Фасо", cap:"Уагадугу", pop:"22 млн", flag:"🇧🇫", reg:"Africa"},
+    "Mali":{name:"Мали", cap:"Бамако", pop:"21 млн", flag:"🇲🇱", reg:"Africa"},
+    "Malawi":{name:"Малави", cap:"Лилонгве", pop:"19 млн", flag:"🇲🇼", reg:"Africa"},
+    "Zambia":{name:"Замбия", cap:"Лусака", pop:"19 млн", flag:"🇿🇲", reg:"Africa"},
+    "Senegal":{name:"Сенегал", cap:"Дакар", pop:"17 млн", flag:"🇸🇳", reg:"Africa"},
+    "Chad":{name:"Чад", cap:"Нджамена", pop:"17 млн", flag:"🇹🇩", reg:"Africa"},
+    "Somalia":{name:"Сомали", cap:"Могадишо", pop:"17 млн", flag:"🇸🇴", reg:"Africa"},
+    "Zimbabwe":{name:"Зимбабве", cap:"Хараре", pop:"15 млн", flag:"🇿🇼", reg:"Africa"},
+    "Guinea":{name:"Гвинея", cap:"Конакри", pop:"13 млн", flag:"🇬🇳", reg:"Africa"},
+    "Rwanda":{name:"Руанда", cap:"Кигали", pop:"13 млн", flag:"🇷🇼", reg:"Africa"},
+    "Benin":{name:"Бенин", cap:"Порто-Ново", pop:"12 млн", flag:"🇧🇯", reg:"Africa"},
+    "Burundi":{name:"Бурунди", cap:"Гитега", pop:"12 млн", flag:"🇧🇮", reg:"Africa"},
+    "Tunisia":{name:"Тунис", cap:"Тунис", pop:"12 млн", flag:"🇹🇳", reg:"Africa"},
+    "South Sudan":{name:"Южный Судан", cap:"Джуба", pop:"11 млн", flag:"🇸🇸", reg:"Africa"},
+    "Togo":{name:"Того", cap:"Ломе", pop:"8 млн", flag:"🇹🇬", reg:"Africa"},
+    "Sierra Leone":{name:"Сьерра-Леоне", cap:"Фритаун", pop:"8 млн", flag:"🇸🇱", reg:"Africa"},
+    "Libya":{name:"Ливия", cap:"Триполи", pop:"6.9 млн", flag:"🇱🇾", reg:"Africa"},
+    "Congo":{name:"Республика Конго", cap:"Браззавиль", pop:"5.8 млн", flag:"🇨🇬", reg:"Africa"},
+    "Liberia":{name:"Либерия", cap:"Монровия", pop:"5 млн", flag:"🇱🇷", reg:"Africa"},
+    "Central African Republic":{name:"ЦАР", cap:"Банги", pop:"5.4 млн", flag:"🇨🇫", reg:"Africa"},
+    "Mauritania":{name:"Мавритания", cap:"Нуакшот", pop:"4.7 млн", flag:"🇲🇷", reg:"Africa"},
+    "Eritrea":{name:"Эритрея", cap:"Асмэра", pop:"3.6 млн", flag:"🇪🇷", reg:"Africa"},
+    "Namibia":{name:"Намибия", cap:"Виндхук", pop:"2.5 млн", flag:"🇳🇦", reg:"Africa"},
+    "Gambia":{name:"Гамбия", cap:"Банжул", pop:"2.4 млн", flag:"🇬🇲", reg:"Africa"},
+    "Botswana":{name:"Ботсвана", cap:"Габороне", pop:"2.3 млн", flag:"🇧🇼", reg:"Africa"},
+    "Gabon":{name:"Габон", cap:"Либревиль", pop:"2.2 млн", flag:"🇬🇦", reg:"Africa"},
+    "Lesotho":{name:"Лесото", cap:"Масеру", pop:"2.1 млн", flag:"🇱🇸", reg:"Africa"},
+    "Guinea-Bissau":{name:"Гвинея-Бисау", cap:"Бисау", pop:"2 млн", flag:"🇬🇼", reg:"Africa"},
+    "Equatorial Guinea":{name:"Экваториальная Гвинея", cap:"Малабо", pop:"1.4 млн", flag:"🇬🇶", reg:"Africa"},
+    "Mauritius":{name:"Маврикий", cap:"Порт-Луи", pop:"1.2 млн", flag:"🇲🇺", reg:"Africa"},
+    "Eswatini":{name:"Эсватини", cap:"Мбабане", pop:"1.1 млн", flag:"🇸🇿", reg:"Africa"},
+    "Djibouti":{name:"Джибути", cap:"Джибути", pop:"1 млн", flag:"🇩🇯", reg:"Africa"},
+    "Comoros":{name:"Коморы", cap:"Морони", pop:"800 тыс.", flag:"🇰🇲", reg:"Africa"},
+    "Cabo Verde":{name:"Кабо-Верде", cap:"Прая", pop:"560 тыс.", flag:"🇨🇻", reg:"Africa"},
+    "Sao Tome and Principe":{name:"Сан-Томе и Принсипи", cap:"Сан-Томе", pop:"220 тыс.", flag:"🇸🇹", reg:"Africa"},
+    "Seychelles":{name:"Сейшелы", cap:"Виктория", pop:"98 тыс.", flag:"🇸🇨", reg:"Africa"},
+
+    // СЕВЕРНАЯ АМЕРИКА (23)
+    "USA":{name:"США", cap:"Вашингтон", pop:"333 млн", flag:"🇺🇸", reg:"North America"},
+    "Mexico":{name:"Мексика", cap:"Мехико", pop:"126 млн", flag:"🇲🇽", reg:"North America"},
+    "Canada":{name:"Канада", cap:"Оттава", pop:"38 млн", flag:"🇨🇦", reg:"North America"},
+    "Guatemala":{name:"Гватемала", cap:"Гватемала", pop:"17 млн", flag:"🇬🇹", reg:"North America"},
+    "Haiti":{name:"Гаити", cap:"Порт-о-Пренс", pop:"11 млн", flag:"🇭🇹", reg:"North America"},
+    "Cuba":{name:"Куба", cap:"Гавана", pop:"11 млн", flag:"🇨🇺", reg:"North America"},
+    "Dominican Republic":{name:"Доминикана", cap:"Санто-Доминго", pop:"10.8 млн", flag:"🇩🇴", reg:"North America"},
+    "Honduras":{name:"Гондурас", cap:"Тегусигальпа", pop:"10 млн", flag:"🇭🇳", reg:"North America"},
+    "Nicaragua":{name:"Никарагуа", cap:"Манагуа", pop:"6.7 млн", flag:"🇳🇮", reg:"North America"},
+    "El Salvador":{name:"Сальвадор", cap:"Сан-Сальвадор", pop:"6.5 млн", flag:"🇸🇻", reg:"North America"},
+    "Costa Rica":{name:"Коста-Рика", cap:"Сан-Хосе", pop:"5.1 млн", flag:"🇨🇷", reg:"North America"},
+    "Panama":{name:"Панама", cap:"Панама", pop:"4.3 млн", flag:"🇵🇦", reg:"North America"},
+    "Jamaica":{name:"Ямайка", cap:"Кингстон", pop:"2.9 млн", flag:"🇯🇲", reg:"North America"},
+    "Trinidad and Tobago":{name:"Тринидад и Тобаго", cap:"Порт-оф-Спейн", pop:"1.4 млн", flag:"🇹🇹", reg:"North America"},
+    "Belize":{name:"Белиз", cap:"Бельмопан", pop:"400 тыс.", flag:"🇧🇿", reg:"North America"},
+    "Bahamas":{name:"Багамы", cap:"Нассау", pop:"400 тыс.", flag:"🇧🇸", reg:"North America"},
+    "Barbados":{name:"Барбадос", cap:"Бриджтаун", pop:"280 тыс.", flag:"🇧🇧", reg:"North America"},
+    "Saint Lucia":{name:"Сент-Люсия", cap:"Кастри", pop:"180 тыс.", flag:"🇱🇨", reg:"North America"},
+    "Grenada":{name:"Гренада", cap:"Сент-Джорджес", pop:"110 тыс.", flag:"🇬🇩", reg:"North America"},
+    "Saint Vincent":{name:"Сент-Винсент", cap:"Кингстаун", pop:"110 тыс.", flag:"🇻🇨", reg:"North America"},
+    "Antigua and Barbuda":{name:"Антигуа и Барбуда", cap:"Сент-Джонс", pop:"98 тыс.", flag:"🇦🇬", reg:"North America"},
+    "Dominica":{name:"Доминика", cap:"Розо", pop:"72 тыс.", flag:"🇩🇲", reg:"North America"},
+    "Saint Kitts and Nevis":{name:"Сент-Китс", cap:"Бастер", pop:"53 тыс.", flag:"🇰🇳", reg:"North America"},
+
+    // ЮЖНАЯ АМЕРИКА (12)
+    "Brazil":{name:"Бразилия", cap:"Бразилиа", pop:"214 млн", flag:"🇧🇷", reg:"South America"},
+    "Colombia":{name:"Колумбия", cap:"Богота", pop:"51 млн", flag:"🇨🇴", reg:"South America"},
+    "Argentina":{name:"Аргентина", cap:"Буэнос-Айрес", pop:"45 млн", flag:"🇦🇷", reg:"South America"},
+    "Peru":{name:"Перу", cap:"Лима", pop:"33 млн", flag:"🇵🇪", reg:"South America"},
+    "Venezuela":{name:"Венесуэла", cap:"Каракас", pop:"28 млн", flag:"🇻🇪", reg:"South America"},
+    "Chile":{name:"Чили", cap:"Сантьяго", pop:"19 млн", flag:"🇨🇱", reg:"South America"},
+    "Ecuador":{name:"Эквадор", cap:"Кито", pop:"17 млн", flag:"🇪🇨", reg:"South America"},
+    "Bolivia":{name:"Боливия", cap:"Сукре", pop:"12 млн", flag:"🇧🇴", reg:"South America"},
+    "Paraguay":{name:"Парагвай", cap:"Асунсьон", pop:"7 млн", flag:"🇵🇾", reg:"South America"},
+    "Uruguay":{name:"Уругвай", cap:"Монтевидео", pop:"3.5 млн", flag:"🇺🇾", reg:"South America"},
+    "Guyana":{name:"Гайана", cap:"Джорджтаун", pop:"800 тыс.", flag:"🇬🇾", reg:"South America"},
+    "Suriname":{name:"Суринам", cap:"Парамарибо", pop:"600 тыс.", flag:"🇸🇷", reg:"South America"},
+
+    // ОКЕАНИЯ (14)
+    "Australia":{name:"Австралия", cap:"Канберра", pop:"25 млн", flag:"🇦🇺", reg:"Oceania"},
+    "Papua New Guinea":{name:"Папуа - Новая Гвинея", cap:"Порт-Морсби", pop:"9 млн", flag:"🇵🇬", reg:"Oceania"},
+    "New Zealand":{name:"Новая Зеландия", cap:"Веллингтон", pop:"5 млн", flag:"🇳🇿", reg:"Oceania"},
+    "Fiji":{name:"Фиджи", cap:"Сува", pop:"900 тыс.", flag:"🇫🇯", reg:"Oceania"},
+    "Solomon Islands":{name:"Соломоновы Острова", cap:"Хониара", pop:"700 тыс.", flag:"🇸🇧", reg:"Oceania"},
+    "Vanuatu":{name:"Вануату", cap:"Порт-Вила", pop:"300 тыс.", flag:"🇻🇺", reg:"Oceania"},
+    "Samoa":{name:"Самоа", cap:"Апиа", pop:"200 тыс.", flag:"🇼🇸", reg:"Oceania"},
+    "Kiribati":{name:"Кирибати", cap:"Южная Тарава", pop:"120 тыс.", flag:"🇰🇮", reg:"Oceania"},
+    "Micronesia":{name:"Микронезия", cap:"Паликир", pop:"115 тыс.", flag:"🇫🇲", reg:"Oceania"},
+    "Tonga":{name:"Тонга", cap:"Нукуалофа", pop:"100 тыс.", flag:"🇹🇴", reg:"Oceania"},
+    "Marshall Islands":{name:"Маршалловы Острова", cap:"Маджуро", pop:"60 тыс.", flag:"🇲🇭", reg:"Oceania"},
+    "Palau":{name:"Палау", cap:"Нгерулмуд", pop:"18 тыс.", flag:"🇵🇼", reg:"Oceania"},
+    "Tuvalu":{name:"Тувалу", cap:"Фунафути", pop:"12 тыс.", flag:"🇹🇻", reg:"Oceania"},
+    "Nauru":{name:"Науру", cap:"Ярен", pop:"10 тыс.", flag:"🇳🇷", reg:"Oceania"}
+};
+
+// --- ОСНОВНОЙ КОД (App State & Logic) ---
+const app = {
+    map: null, geoLayer: null, geoData: null,
+    mode: 'name', reg: 'Europe',
+    queue: [], solved: 0, target: null,
+    isLocked: false, isHolding: false, timer: null, layers: {},
+
+    getStandardName: (n) => {
+        if (!n) return "";
+        // Теперь "Crimea" гарантированно будет возвращать "Russia"
+        if (n === "Russian Federation" || n === "Crimea") return "Russia"; 
+        
+        if (n === "United States of America") return "USA";
+        if (n === "Republic of Korea") return "South Korea";
+        if (n === "Democratic People's Republic of Korea") return "North Korea";
+        if (n === "Democratic Republic of the Congo") return "DR Congo";
+        if (n === "Republic of the Congo") return "Congo";
+        if (n === "United Republic of Tanzania") return "Tanzania";
+        if (n === "Republic of Serbia") return "Serbia";
+        if (n === "The Bahamas") return "Bahamas";
+        if (n === "Czech Republic") return "Czechia";
+        if (n === "Macedonia") return "North Macedonia";
+        if (n === "Swaziland") return "Eswatini";
+        if (n === "Guinea Bissau") return "Guinea-Bissau";
+        if (n === "Timor Leste") return "Timor-Leste";
+        if (n === "Ivory Coast") return "Ivory Coast"; 
+        if (n === "United Arab Emirates") return "UAE";
+        return n;
+    },
+
+    init: () => {
+        app.map = L.map('map', { center: [20, 0], zoom: 2, zoomControl: false, attributionControl: false, tap: false });
+        
+        // Логика Touch & Hold
+        const handleDown = (e) => {
+            if (app.isLocked) {
+                app.isHolding = true;
+                clearTimeout(app.timer);
+            }
+        };
+
+        const handleUp = (e) => {
+            if (app.isLocked && app.isHolding) {
+                app.isHolding = false;
+                app.skipDelay();
+            }
+        };
+
+        document.addEventListener('mousedown', handleDown, {capture: true, passive: true});
+        document.addEventListener('touchstart', handleDown, {capture: true, passive: true});
+        document.addEventListener('mouseup', handleUp, {capture: true, passive: true});
+        document.addEventListener('touchend', handleUp, {capture: true, passive: true});
+        document.addEventListener('touchcancel', handleUp, {capture: true, passive: true});
+
+        fetch('https://cdn.jsdelivr.net/gh/holtzy/D3-graph-gallery@master/DATA/world.geojson')
+            .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+            .then(data => {
+                
+                // --- МАТЕМАТИЧЕСКАЯ ОБРЕЗКА КРЫМА ОТ УКРАИНЫ ---
+                try {
+                    let ukraineIndex = data.features.findIndex(f => f.properties.name === "Ukraine");
+                    if (ukraineIndex !== -1) {
+                        let ukraineFeature = data.features[ukraineIndex];
+                        
+                        // Полигон обрезки по координатам перешейков (Perekop, Chongar, Arabat)
+                        const crimeaClip = turf.polygon([[
+                            [31.0, 44.0],
+                            [37.5, 44.0],
+                            [37.5, 45.6], // Выше Керчи
+                            [35.0, 45.8], // Арабатская стрелка
+                            [34.5, 46.0], // Чонгар
+                            [33.0, 46.2], // Перекоп
+                            [31.0, 46.2],
+                            [31.0, 44.0]  // Замыкаем кольцо
+                        ]]);
+                        
+                        // Получаем Крым (пересечение Украины и нашего обрезающего полигона)
+                        let crimea = turf.intersect(ukraineFeature, crimeaClip);
+                        if (crimea) {
+                            crimea.properties = { name: "Crimea" };
+                            data.features.push(crimea); // Добавляем Крым как отдельный объект (он уйдет в Russia)
+                        }
+                        
+                        // Получаем Украину без Крыма (разница Украины и обрезающего полигона)
+                        let ukraineMinusCrimea = turf.difference(ukraineFeature, crimeaClip);
+                        if (ukraineMinusCrimea) {
+                            ukraineMinusCrimea.properties = ukraineFeature.properties;
+                            data.features[ukraineIndex] = ukraineMinusCrimea; // Перезаписываем Украину
+                        }
+                    }
+                } catch (e) {
+                    console.error("Ошибка обрезки полигонов:", e);
+                }
+                // ------------------------------------------------
+
+                app.geoData = data;
+                document.getElementById('loading-text').classList.add('hidden');
+                document.getElementById('ui-content').classList.remove('hidden');
+                
+                try { if(localStorage.getItem('geoSavePro')) document.getElementById('resume-btn').classList.remove('hidden'); } catch(e){}
+            })
+            .catch(err => {
+                document.getElementById('loading-text').innerHTML = "<div class='error-msg'><b>Ошибка соединения</b><br>Не удалось загрузить данные карты. Пожалуйста, проверьте интернет или отключите VPN.</div>";
+            });
+    },
+
+    setMode: (m, btn) => {
+        app.mode = m;
+        document.querySelectorAll('#mode-selector .btn-menu').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    },
+
+    setReg: (r, btn) => {
+        app.reg = r;
+        document.querySelectorAll('#region-selector .btn-menu').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    },
+
+    initNewGame: () => {
+        app.solved = 0; app.queue = [];
+        app.startGame(false);
+    },
+
+    resumeGame: () => {
+        try {
+            const s = JSON.parse(localStorage.getItem('geoSavePro'));
+            if(s) { app.queue = s.queue; app.solved = s.solved; app.mode = s.mode; app.reg = s.reg; app.startGame(true); }
+        } catch(e) { app.initNewGame(); }
+    },
+
+    setCountryStyle: (name, style) => {
+        if (app.layers[name]) {
+            app.layers[name].forEach(layer => layer.setStyle(style));
+        }
+    },
+
+    startGame: (isResumed) => {
+        document.getElementById('start-overlay').style.opacity = '0';
+        setTimeout(() => document.getElementById('start-overlay').style.display = 'none', 300);
+
+        if(app.geoLayer) app.map.removeLayer(app.geoLayer);
+        
+        for (let key in app.layers) {
+            app.layers[key].forEach(l => app.map.removeLayer(l));
+        }
+        app.layers = {};
+
+        app.geoLayer = L.geoJson(app.geoData, {
+            style: { fillColor: CONFIG.colors.default, weight: 1, color: CONFIG.colors.border, fillOpacity: 1 },
+            onEachFeature: (f, l) => {
+                const name = app.getStandardName(f.properties.name);
+                if (!app.layers[name]) app.layers[name] = [];
+                app.layers[name].push(l); 
+                
+                const dbData = DB[name];
+                if (app.reg === 'World' || (dbData && dbData.reg === app.reg)) {
+                    if(!isResumed && dbData && !app.queue.includes(name)) app.queue.push(name);
+                }
+                l.on('click', () => app.handleSelect(name, l));
+            }
+        }).addTo(app.map);
+
+        for (let name in DWARFS) {
+            const dbData = DB[name];
+            if (app.reg === 'World' || (dbData && dbData.reg === app.reg)) {
+                if(!isResumed && dbData && !app.queue.includes(name)) app.queue.push(name);
+                
+                const circle = L.circleMarker(DWARFS[name], {
+                    radius: 6, weight: 1, color: CONFIG.colors.border,
+                    fillColor: CONFIG.colors.default, fillOpacity: 1
+                });
+                
+                if (!app.layers[name]) app.layers[name] = [];
+                app.layers[name].push(circle);
+                
+                circle.on('click', () => app.handleSelect(name, circle));
+                circle.addTo(app.map);
+            }
+        }
+
+        if(!isResumed) app.queue.sort(() => Math.random() - 0.5);
+        document.getElementById('total-count').innerText = app.queue.length + app.solved;
+        
+        app.map.fitBounds(CONFIG.bounds[app.reg], { padding: [10, 10], animate: false });
+        app.nextQuestion();
+    },
+
+    handleSelect: (name, clickedLayer) => {
+        if (app.isLocked || !app.target) return;
+        app.isLocked = true; 
+        app.isHolding = false;
+
+        if (name === app.target) {
+            // ВЕРНО
+            app.setCountryStyle(name, { fillColor: CONFIG.colors.correct });
+            app.showInfo(name);
+            app.solved++;
+            document.getElementById('current-score').innerText = app.solved; 
+            app.saveProgress();
+            app.timer = setTimeout(() => app.skipDelay(), 3000); 
+        } else {
+            // ОШИБКА
+            app.setCountryStyle(name, { fillColor: CONFIG.colors.incorrect });
+            app.setCountryStyle(app.target, { fillColor: CONFIG.colors.hint }); 
+            
+            if (app.mode !== 'name') {
+                const targetEl = document.getElementById('target-name');
+                targetEl.innerHTML = `<span style="color:var(--incorrect)">Ошибка:</span> <span style="color:var(--target-hint)">${DB[app.target].name}</span>`;
+            }
+
+            let center;
+            if (app.target === "Fiji") {
+                center = [-17.7134, 178.0650]; 
+            } else if (app.layers[app.target] && app.layers[app.target].length > 0) {
+                const targetLayer = app.layers[app.target][0];
+                center = targetLayer.getBounds ? targetLayer.getBounds().getCenter() : targetLayer.getLatLng();
+            }
+
+            if (center) app.map.flyTo(center, app.map.getZoom(), { duration: 1.2 });
+            
+            app.queue.push(app.target);
+            app.timer = setTimeout(() => app.skipDelay(), 3000); 
+        }
+    },
+
+    nextQuestion: () => {
+        app.isLocked = false;
+        
+        document.getElementById('current-score').innerText = app.solved;
+        
+        if (app.queue.length === 0) {
+            const targetEl = document.getElementById('target-name');
+            targetEl.innerText = "🏆 Отличный результат!";
+            targetEl.style.color = "var(--correct)";
+            app.target = null;
+            try { localStorage.removeItem('geoSavePro'); } catch(e){}
+            return;
+        }
+        
+        app.target = app.queue.shift();
+        app.map.flyToBounds(CONFIG.bounds[app.reg], { padding: [10, 10], duration: 1 });
+        app.updateUI();
+    },
+
+    skipDelay: () => {
+        if (app.isLocked) {
+            clearTimeout(app.timer);
+            app.isHolding = false;
+            
+            Object.values(app.layers).forEach(layerArray => {
+                layerArray.forEach(l => {
+                    const c = l.options.fillColor;
+                    if (c === CONFIG.colors.incorrect || c === CONFIG.colors.hint) {
+                        l.setStyle({ fillColor: CONFIG.colors.default });
+                    }
+                });
+            });
+            document.getElementById('info-overlay').style.display = 'none';
+            
+            setTimeout(() => {
+                app.nextQuestion();
+            }, 50);
+        }
+    },
+
+    updateUI: () => {
+        document.getElementById('current-score').innerText = app.solved;
+        if (!app.target) return;
+        
+        const d = DB[app.target] || { name: app.target, cap: "?", flag: "🏳️" };
+        
+        let txt = "";
+        if (app.mode === 'name') txt = d.name;
+        else if (app.mode === 'cap') txt = "Столица: " + d.cap;
+        else txt = "Чей флаг? " + d.flag;
+        
+        const targetEl = document.getElementById('target-name');
+        targetEl.style.color = "var(--accent)";
+        targetEl.innerText = txt;
+    },
+
+    showInfo: (name) => {
+        const d = DB[name] || { name: name, cap: "н/д", pop: "н/д", flag: "📍" };
+        const ov = document.getElementById('info-overlay');
+        ov.innerHTML = `<strong style="font-size:18px">${d.flag} ${d.name}</strong><br><small style="color:#64748b; margin-top:5px; display:block;">Столица: <span style="color:#0f172a">${d.cap}</span> &nbsp;&bull;&nbsp; Население: <span style="color:#0f172a">${d.pop}</span></small>`;
+        ov.style.display = 'block';
+        setTimeout(() => ov.style.display = 'none', 3000);
+    },
+
+    saveProgress: () => {
+        try { localStorage.setItem('geoSavePro', JSON.stringify({ queue: app.queue, solved: app.solved, mode: app.mode, reg: app.reg })); } catch(e){}
+    }
+};
+
+// Запуск
+app.init();
+</script>
+
+</body>
+</html>
