@@ -76,6 +76,9 @@
         .btn-menu { background: rgba(255,255,255,0.05); color: #cbd5e1; border: 2px solid transparent; padding: 14px; border-radius: 14px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
         .btn-menu.active { background: rgba(255,255,255,0.1); color: white; border-color: #3b82f6; }
         
+        .btn-world { grid-column: span 2; background: rgba(59, 130, 246, 0.15) !important; color: white !important; border-color: transparent; }
+        .btn-world.active { background: rgba(59, 130, 246, 0.5) !important; border-color: #3b82f6 !important; }
+        
         .btn-start { width: 100%; padding: 18px; border-radius: 16px; border: none; background: #3b82f6; color: white; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 25px; transition: background 0.2s; }
         .btn-start:active { background: #2563eb; }
         .btn-resume { background: #10b981; margin-top: 0; margin-bottom: 5px; }
@@ -88,7 +91,7 @@
 
 <div id="start-overlay">
     <div class="menu-card">
-        <h1 style="margin: 0 0 5px 0; font-size: 28px; text-align: center; color: white;">GeoMaster</h1>
+        <h1 style="margin: 0 0 5px 0; font-size: 28px; text-align: center; color: white;">GEO</h1>
         <p style="margin: 0 0 20px 0; text-align: center; color: #94a3b8; font-size: 14px;">Контурная карта (195 стран)</p>
         
         <div id="loading-text" style="text-align: center; padding: 30px 0; color: #94a3b8;">
@@ -115,7 +118,8 @@
                 <button class="btn-menu" onclick="app.setReg('North America', this)">Сев.Америка (23)</button>
                 <button class="btn-menu" onclick="app.setReg('South America', this)">Юж.Америка (12)</button>
                 <button class="btn-menu" onclick="app.setReg('Oceania', this)">Океания (14)</button>
-                <button class="btn-menu" onclick="app.setReg('World', this)" style="grid-column: span 2; background: rgba(59, 130, 246, 0.2); border-color: transparent; color: white;">Все страны мира (195) 🌍</button>
+                <button class="btn-menu btn-world" onclick="app.setReg('World', this)">Все страны мира (195) 🌍</button>
+                <button class="btn-menu btn-world" onclick="app.setReg('World20', this)">Все страны мира (20) 🎲</button>
             </div>
             <button class="btn-start" onclick="app.initNewGame()">Начать новую игру</button>
         </div>
@@ -149,7 +153,8 @@ const CONFIG = {
         'North America': [[10, -130], [75, -50]],
         'South America': [[-55, -85], [15, -35]],
         'Oceania': [[-45, 110], [-5, 180]],
-        'World': [[-55, -170], [75, 170]]
+        'World': [[-55, -170], [75, 170]],
+        'World20': [[-55, -170], [75, 170]]
     },
     colors: {
         default: '#ffffff',
@@ -174,7 +179,8 @@ const DWARFS = {
     "Nauru": [-0.5228, 166.9315], "Palau": [7.5150, 134.5825],
     "Marshall Islands": [7.1315, 171.1845], "Micronesia": [6.8874, 158.2150],
     "Kiribati": [1.4518, 173.0030], "Samoa": [-13.7590, -172.1046],
-    "Tonga": [-21.1790, -175.1982], "Vanuatu": [-15.3767, 166.9592]
+    "Tonga": [-21.1790, -175.1982], "Vanuatu": [-15.3767, 166.9592],
+    "Luxembourg": [49.8153, 6.1296], "Mauritius": [-20.3484, 57.5522], "Palestine": [31.9522, 35.2332]
 };
 
 const DB = {
@@ -530,36 +536,32 @@ const app = {
                 const name = app.getStandardName(f.properties.name);
                 if (!app.layers[name]) app.layers[name] = [];
                 app.layers[name].push(l); 
-                
-                const dbData = DB[name];
-                if (app.reg === 'World' || (dbData && dbData.reg === app.reg)) {
-                    if(!isResumed && dbData && !app.queue.includes(name)) app.queue.push(name);
-                }
                 l.on('click', () => app.handleSelect(name, l));
             }
         }).addTo(app.map);
 
         for (let name in DWARFS) {
-            const dbData = DB[name];
-            if (app.reg === 'World' || (dbData && dbData.reg === app.reg)) {
-                if(!isResumed && dbData && !app.queue.includes(name)) app.queue.push(name);
-                
-                const circle = L.circleMarker(DWARFS[name], {
-                    radius: 6, weight: 1, color: CONFIG.colors.border,
-                    fillColor: CONFIG.colors.default, fillOpacity: 1
-                });
-                
-                if (!app.layers[name]) app.layers[name] = [];
-                app.layers[name].push(circle);
-                
-                circle.on('click', () => app.handleSelect(name, circle));
-                circle.addTo(app.map);
+            const circle = L.circleMarker(DWARFS[name], {
+                radius: 6, weight: 1, color: CONFIG.colors.border,
+                fillColor: CONFIG.colors.default, fillOpacity: 1
+            });
+            
+            if (!app.layers[name]) app.layers[name] = [];
+            app.layers[name].push(circle);
+            
+            circle.on('click', () => app.handleSelect(name, circle));
+            circle.addTo(app.map);
+        }
+
+        if (!isResumed) {
+            app.queue = Object.keys(DB).filter(name => app.reg === 'World' || app.reg === 'World20' || DB[name].reg === app.reg);
+            app.queue.sort(() => Math.random() - 0.5);
+            if (app.reg === 'World20') {
+                app.queue = app.queue.slice(0, 20);
             }
         }
 
-        if(!isResumed) app.queue.sort(() => Math.random() - 0.5);
         document.getElementById('total-count').innerText = app.queue.length + app.solved;
-        
         app.map.fitBounds(CONFIG.bounds[app.reg], { padding: [10, 10], animate: false });
         app.nextQuestion();
     },
