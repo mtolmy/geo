@@ -153,8 +153,8 @@ const CONFIG = {
         'North America': [[10, -130], [75, -50]],
         'South America': [[-55, -85], [15, -35]],
         'Oceania': [[-45, 110], [-5, 180]],
-        'World': [[-55, -170], [75, 146]],
-        'World20': [[-55, -170], [75, 146]]
+        'World': [[-55, -125], [75, 178]],
+        'World20': [[-55, -125], [75, 178]]
     },
     colors: {
         default: '#ffffff',
@@ -476,7 +476,7 @@ const app = {
                     let antarcticaIndex = data.features.findIndex(f => f.properties.name === "Antarctica");
                     if (antarcticaIndex !== -1) {
                         let antFeature = data.features[antarcticaIndex];
-                        // Оставляем только территории от -62 до +90 градусов (отрезаем гигантский южный "хвост")
+                        // Оставляем только территории от -72 до +90 градусов (отрезаем гигантский южный "хвост")
                         const antClip = turf.bboxPolygon([-180, -72, 180, 90]); 
                         let clippedAnt = turf.intersect(antFeature, antClip);
                         if (clippedAnt) {
@@ -609,11 +609,11 @@ const app = {
             const alertIcon = `<span style="color:var(--incorrect); font-weight:900; font-size:18px;">!</span>`;
             
             if (app.mode === 'cap') {
-                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint)">${DB[app.target].name} - ${DB[app.target].cap}</span>`;
+                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint); margin-left: 4px;">${DB[app.target].name} - ${DB[app.target].cap}</span>`;
             } else if (app.mode === 'flag') {
-                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint)">${DB[app.target].name} - <span style="font-size:1.5em; vertical-align:middle;">${DB[app.target].flag}</span></span>`;
+                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint); margin-left: 4px;">${DB[app.target].name} - <span style="font-size:1.5em; vertical-align:middle;">${DB[app.target].flag}</span></span>`;
             } else {
-                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint)">${DB[app.target].name}</span>`;
+                targetEl.innerHTML = `${alertIcon} <span style="color:var(--target-hint); margin-left: 4px;">${DB[app.target].name}</span>`;
             }
 
             let center;
